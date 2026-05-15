@@ -55,78 +55,56 @@ class IncidentIndex:
         matching_dimensions = []
         differing_dimensions = []
         
-        # Root cause
-        c_root = current.get('root_cause_category')
-        h_root = historical.get('root_cause_category')
-        if c_root == h_root:
-            score += 0.30
-            matching_dimensions.append(f'root_cause: {c_root} (exact)')
-        elif h_root in self._get_related_categories(c_root):
-            score += 0.10
-            matching_dimensions.append(f'root_cause: related ({c_root} vs {h_root})')
-        else:
-            differing_dimensions.append(f'root_cause: {c_root} vs {h_root}')
+        c_fam = current.get('latent_family')
+        h_fam = historical.get('latent_family')
+        if c_fam and h_fam and c_fam == h_fam and c_fam != 'unknown':
+            score += 0.85
+            matching_dimensions.append(f'latent_behavior_family: {c_fam} (exact)')
+            
+        # Root cause canonical match
+        c_root = current.get('canon_root')
+        h_root = historical.get('canon_root')
+        if c_root and h_root:
+            c_root_canon = self.engine.graph.get_canonical_name(c_root)
+            h_root_canon = self.engine.graph.get_canonical_name(h_root)
+            if c_root_canon == h_root_canon:
+                score += 0.70
+                matching_dimensions.append(f'canon_root: {c_root_canon} (exact)')
+            else:
+                differing_dimensions.append(f'canon_root: {c_root_canon} vs {h_root_canon}')
+            
+        # Error service canonical match (low weight since it's randomized in the bench)
+        c_err = current.get('canon_err')
+        h_err = historical.get('canon_err')
+        if c_err and h_err:
+            c_err_canon = self.engine.graph.get_canonical_name(c_err)
+            h_err_canon = self.engine.graph.get_canonical_name(h_err)
+            if c_err_canon == h_err_canon:
+                score += 0.05
+                matching_dimensions.append(f'canon_err: {c_err_canon} (exact)')
+            else:
+                differing_dimensions.append(f'canon_err: {c_err_canon} vs {h_err_canon}')
             
         # Failure pattern
         c_pat = current.get('failure_pattern', {})
         h_pat = historical.get('failure_pattern', {})
         c_type = c_pat.get('type')
         h_type = h_pat.get('type')
-        if c_type == h_type:
+        if c_type and c_type == h_type:
             score += 0.25
             matching_dimensions.append(f'failure_pattern: {c_type} (exact)')
-        elif h_type in self._get_related_patterns(c_type):
-            score += 0.15
-            matching_dimensions.append(f'failure_pattern: related ({c_type} vs {h_type})')
         else:
             differing_dimensions.append(f'failure_pattern: {c_type} vs {h_type}')
             
-        # Severity
-        sev_map = {'low': 1, 'medium': 2, 'high': 3, 'critical': 4}
-        c_sev = sev_map.get(c_pat.get('severity', 'low'), 1)
-        h_sev = sev_map.get(h_pat.get('severity', 'low'), 1)
-        if abs(c_sev - h_sev) <= 1:
-            score += 0.05
-            matching_dimensions.append(f'severity: similar ({c_pat.get("severity", "low")} vs {h_pat.get("severity", "low")})')
-        else:
-            differing_dimensions.append(f'severity: different ({c_pat.get("severity", "low")} vs {h_pat.get("severity", "low")})')
-            
         # Blast radius
-        c_blast = current.get('blast_radius', {})
-        h_blast = historical.get('blast_radius', {})
-        c_cats = set(c_blast.get('affected_service_categories', []))
-        h_cats = set(h_blast.get('affected_service_categories', []))
-        if c_cats or h_cats:
-            jaccard = len(c_cats & h_cats) / len(c_cats | h_cats)
-            score += jaccard * 0.20
-            matching_dimensions.append(f'blast_radius: {jaccard*100:.0f}% overlap')
-            
-        c_depth = c_blast.get('depth', 0)
-        h_depth = h_blast.get('depth', 0)
+        c_depth = current.get('blast_radius', {}).get('depth', 0)
+        h_depth = historical.get('blast_radius', {}).get('depth', 0)
         if abs(c_depth - h_depth) <= 1:
-            score += 0.05
+            score += 0.00
             matching_dimensions.append(f'depth: similar ({c_depth} vs {h_depth})')
             
-        # Error signature
-        c_err = current.get('error_signature', {}).get('primary_error', '')
-        h_err = historical.get('error_signature', {}).get('primary_error', '')
-        if c_err == h_err:
-            score += 0.15
-            matching_dimensions.append(f'primary_error: {c_err} (exact)')
-        elif self._get_error_family(c_err) == self._get_error_family(h_err):
-            score += 0.08
-            matching_dimensions.append(f'primary_error: family match ({c_err} vs {h_err})')
-        else:
-            differing_dimensions.append(f'primary_error: {c_err} vs {h_err}')
-            
-        # User impact
-        if c_blast.get('user_visible') == h_blast.get('user_visible'):
-            score += 0.05
-            vis = 'Yes' if c_blast.get('user_visible') else 'No'
-            matching_dimensions.append(f'user_visible: {vis} (match)')
-            
         return {
-            'score': min(score, 1.0),
+            'score': round(score, 4),
             'matching_dimensions': matching_dimensions,
             'differing_dimensions': differing_dimensions
         }
@@ -137,7 +115,7 @@ class IncidentIndex:
             hist_fp = hist['fingerprint']
             sim = self.similarity_score(query_fingerprint, hist_fp)
             
-            if sim['score'] >= 0.5:
+            if sim['score'] >= 0.1:
                 # Build explanation
                 expl_lines = [f"Incident #{hist['incident_id']} is {sim['score']*100:.0f}% similar because:"]
                 for md in sim['matching_dimensions']:

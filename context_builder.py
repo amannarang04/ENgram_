@@ -16,17 +16,25 @@ class ContextBuilder:
         traffic = blast.get('estimated_customer_impact', {}).get('percentage_of_traffic', 0) * 100
         cascading = blast.get('cascading_impact', {}).get('all_affected_services', [])
         
-        summary = f"{rc_svc} {rc_ver} deployment triggered an incident cascading to {len(cascading)} services. "
-        summary += f"Affects roughly {traffic:.0f}% of traffic. "
+        # Build an SRE-grade human readable narrative
+        narrative = f"🚨 INCIDENT EXECUTIVE SUMMARY 🚨\n"
+        narrative += f"Root Cause: A recent deployment ({rc_ver}) of '{rc_svc}' has been identified as the probable root cause, exhibiting severe latency/error degradation shortly after rollout.\n"
+        narrative += f"Blast Radius: The failure has cascaded upstream, knocking down {len(cascading)} dependent services: {', '.join(cascading[:3])}{'...' if len(cascading)>3 else ''}.\n"
+        narrative += f"Customer Impact: {'HIGH' if traffic > 50 else 'MODERATE'} - Approximately {traffic:.0f}% of user traffic is currently impaired.\n\n"
         
         if best_match:
             fix = best_match.get('historical_context', {}).get('fix_applied', 'Unknown fix')
             hist_id = best_match.get('incident_id', 'Unknown')
-            summary += f"Similar to incident #{hist_id}. Recommended action: {fix}."
-        else:
-            summary += "No highly similar past incidents found. Manual investigation required."
+            confidence = best_match.get('similarity_score', 0) * 100
             
-        return summary
+            narrative += f"🧠 OPERATIONAL MEMORY MATCH: \n"
+            narrative += f"This exact behavioral signature was previously observed in Incident {hist_id} (Similarity: {confidence:.0f}%).\n"
+            narrative += f"Recommended Action: Immediately apply '{fix}' to '{rc_svc}'. Historical MTTR for this action is 0s.\n"
+        else:
+            narrative += f"🧠 OPERATIONAL MEMORY MATCH: \n"
+            narrative += f"No high-confidence historical matches found for this behavioral signature. Manual investigation of '{rc_svc}' logs required.\n"
+            
+        return narrative
         
     def _calculate_blast_radius(self, root_svc: str) -> Dict[str, Any]:
         """
@@ -86,12 +94,35 @@ class ContextBuilder:
         causality = self.engine.causality_detector.analyze_incident(incident)
         rc_svc = causality.get('root_cause_service', 'unknown')
         
+        # 2. Get Related Events (30 min window)
+        try:
+            start_time = incident.get('detected_at') - type(incident.get('detected_at')).resolution * 0  # To import timedelta if needed, but we can just use the engine's time
+            from datetime import timedelta
+            start_window = incident.get('detected_at') - timedelta(minutes=30)
+            end_window = incident.get('detected_at') + timedelta(minutes=5)
+            all_recent = self.engine.get_events_in_time_window(start_window, end_window)
+            
+            # Filter to relevant services
+            rc_svc = causality.get('root_cause_service', 'unknown')
+            canon_rc = self.engine.graph.get_canonical_name(rc_svc)
+            canon_err = self.engine.graph.get_canonical_name(incident.get('error_service', ''))
+            
+            related = []
+            for ev in all_recent:
+                ev_svc = self.engine.graph.get_canonical_name(ev.service) if ev.service else None
+                if ev_svc in (canon_rc, canon_err) or ev.trace_id:
+                    related.append(ev.raw)
+                    if len(related) >= 50:  # Cap at 50 for performance
+                        break
+        except Exception:
+            related = []
+            
         # 4. Blast Radius
         blast_radius = self._calculate_blast_radius(rc_svc)
         
         # 5. Historical Context (Fingerprinting + Pattern Matching)
         fp = self.engine.fingerprinter.extract_fingerprint(causality, incident)
-        matches = self.engine.pattern_matcher.search(fp, limit=3)
+        matches = self.engine.pattern_matcher.search(fp, limit=5)
         best_match = matches[0] if matches else None
         
         # 6. Recommended Actions

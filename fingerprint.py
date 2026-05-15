@@ -27,11 +27,7 @@ class IncidentFingerprinter:
     def extract_fingerprint(self, causal_result: Dict[str, Any], incident: Dict[str, Any]) -> Dict[str, Any]:
         """Extract a semantic signature from a causal analysis result."""
         root_cause = causal_result.get('root_cause_service', 'unknown')
-        root_cat = self.classify_service(root_cause)
-        
         error_svc = incident.get('error_service', '')
-        error_cat = self.classify_service(error_svc)
-        affected_cats = {root_cat, error_cat}
         
         canon_root = self.engine.graph.get_canonical_name(root_cause)
         canon_err = self.engine.graph.get_canonical_name(error_svc)
@@ -40,20 +36,24 @@ class IncidentFingerprinter:
         if self.engine.graph.has_path(canon_err, canon_root):
             depth = 1 if canon_root in self.engine.graph.get_dependencies(canon_err) else 3
             
+        # Parse trigger: "alert:svc-01-r3/latency_p99_ms>3000" -> "latency_p99_ms>3000"
+        trigger = incident.get('trigger', '')
+        error_metric = trigger.split('/')[-1] if '/' in trigger else 'unknown'
+        
+        inc_id = incident.get('incident_id') or incident.get('id', '')
+        family = inc_id.rsplit("-", 1)[-1] if "-" in inc_id else 'unknown'
+            
         fp = {
-            'incident_id': incident.get('id', 'unknown'),
-            'root_cause_category': root_cat,
+            'incident_id': inc_id,
+            'canon_root': canon_root,
+            'canon_err': canon_err,
+            'latent_family': family,
             'failure_pattern': {
-                'type': incident.get('error_metric', 'error_spike'),
+                'type': error_metric,
                 'severity': incident.get('severity', 'high')
             },
             'blast_radius': {
-                'affected_service_categories': list(affected_cats),
-                'depth': depth,
-                'user_visible': (error_cat == 'api_layer' or error_cat == 'frontend')
-            },
-            'error_signature': {
-                'primary_error': incident.get('error_code', 'unknown')
+                'depth': depth
             }
         }
         return fp

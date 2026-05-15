@@ -163,7 +163,7 @@ def parse_and_normalize_event(raw_json: Dict[str, Any]) -> Optional[Event]:
     
     elif kind == 'topology':
         event.change = raw_json.get('change')
-        event.from_name = raw_json.get('from')
+        event.from_name = raw_json.get('from_')
         event.to_name = raw_json.get('to')
     
     elif kind == 'incident_signal':
@@ -454,7 +454,8 @@ class Engine:
                         'fix_applied': remediations[-1].action,
                         'incident_id': inc_dict['id']
                     }
-                    self.pattern_matcher.index_incident(inc_dict, causality)
+                    fp = self.fingerprinter.extract_fingerprint(causality, inc_dict)
+                    self.pattern_matcher.add_incident(inc_dict['id'], fp, causality['historical_context'])
     
     # === HELPER QUERY METHODS (for Topics 2-6) ===
     

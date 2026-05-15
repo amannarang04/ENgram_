@@ -14,21 +14,27 @@ class ServiceDependencyGraph:
         self.rename_map: Dict[str, str] = {}
         
     def get_canonical_name(self, service_name: str, rename_map: Optional[Dict[str, str]] = None) -> str:
-        """Resolve service name to canonical name following rename chains."""
+        """Resolve service name to its original base canonical name by following rename chains backwards."""
         if rename_map is not None:
             self.rename_map.update(rename_map)
             
+        # Build reverse map: to_name -> from_name
+        reverse_map = {v: k for k, v in self.rename_map.items()}
+            
         current = service_name
         seen = set()
-        while current in self.rename_map and current not in seen:
+        while current in reverse_map and current not in seen:
             seen.add(current)
-            current = self.rename_map[current]
+            current = reverse_map[current]
         return current
         
     def build_from_events(self, events: List[Any], rename_map: Dict[str, str]) -> None:
         """
         Build dependency graph from trace events.
         """
+        self.graph.clear()
+        self.service_versions.clear()
+        self.last_deployed_version.clear()
         self.rename_map = rename_map
         
         for event in events:
