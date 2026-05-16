@@ -119,6 +119,9 @@ class EngineAdapter(Adapter):
                     })
 
         # Compute confidence directly
+        contradictions = self.engine.causality_detector.detect_signal_contradictions(related_events) if hasattr(self.engine, 'causality_detector') else {}
+        penalty = contradictions.get('overall_penalty', 0.0)
+        
         confidence = 0.0
         if causal_chain:
             confidence += 0.4 * causal_chain[0].get('confidence', 0.5)
@@ -126,7 +129,33 @@ class EngineAdapter(Adapter):
             confidence += 0.4 * float(similar_past[0].get('similarity', 0.5))
         if remediations:
             confidence += 0.2 * remediations[0].get('confidence', 0.5)
-        confidence = min(1.0, confidence)
+            
+        confidence = max(0.0, min(1.0, confidence - penalty))
+
+        # SRE Narrative
+        root_cause = "Unknown root cause"
+        if causal_chain:
+            root_cause = f"{causal_chain[0].get('evidence')} (Confidence: {causal_chain[0].get('confidence')})"
+        
+        blast_str = f"Directly affected: {s_copy.get('error_service')}"
+        if hasattr(self.engine, 'graph'):
+            deps = self.engine.graph.get_dependents(s_copy.get('error_service'))
+            if deps:
+                blast_str += f"\nIndirect cascading impact to: {', '.join(deps)}"
+        
+        signal_str = f"Analyzed {len(related_events)} recent events."
+        if contradictions.get('is_noisy'):
+            signal_str += f"\nWARNING: Contradictory signals detected ({contradictions.get('count')} conflicts), confidence penalized by {penalty:.2f}."
+        
+        hist_str = "No historical matches found."
+        if similar_past:
+            hist_str = f"Matches {len(similar_past)} past incidents. Top match: {similar_past[0]['incident_id']} ({similar_past[0]['similarity']*100:.1f}% similar)"
+        
+        rem_str = "Investigate manually."
+        if remediations:
+            rem_str = f"Action: {remediations[0]['action']} on {remediations[0]['target']}\nExpected Outcome: {remediations[0]['historical_outcome']}\nConfidence: {remediations[0]['confidence']*100:.1f}%"
+            
+        narrative = f"ROOT CAUSE:\n{root_cause}\n\nBLAST RADIUS:\n{blast_str}\n\nSIGNAL ANALYSIS:\n{signal_str}\n\nHISTORICAL PRECEDENT:\n{hist_str}\n\nRECOMMENDED REMEDIATION:\n{rem_str}"
 
         # Assemble the final conformant Context
         return {
@@ -135,7 +164,7 @@ class EngineAdapter(Adapter):
             "similar_past_incidents": similar_past,
             "suggested_remediations": remediations,
             "confidence": confidence,
-            "explain": raw_context.get('executive_summary', '')
+            "explain": narrative
         }
 
     def close(self):

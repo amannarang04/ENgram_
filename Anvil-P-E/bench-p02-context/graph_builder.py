@@ -14,18 +14,35 @@ class ServiceDependencyGraph:
         self.rename_map: Dict[str, str] = {}
         
     def get_canonical_name(self, service_name: str, rename_map: Optional[Dict[str, str]] = None) -> str:
-        """Resolve service name to its original base canonical name by following rename chains backwards."""
+        """
+        Resolve service name through FORWARD rename chain.
+        
+        Handles cascading renames:
+            If "payments-svc" → "billing-svc" → "billing-core"
+            Then get_canonical_name("payments-svc") returns "billing-core"
+        
+        Args:
+            service_name: Service name (may be at any point in the rename chain)
+            rename_map: Optional rename map to update
+        
+        Returns:
+            The current canonical (most recent) name of the service
+        
+        Time complexity: O(k) where k = length of rename chain (typically 1-3)
+        """
         if rename_map is not None:
             self.rename_map.update(rename_map)
-            
-        # Build reverse map: to_name -> from_name
-        reverse_map = {v: k for k, v in self.rename_map.items()}
-            
+        
+        visited = set()
         current = service_name
-        seen = set()
-        while current in reverse_map and current not in seen:
-            seen.add(current)
-            current = reverse_map[current]
+        
+        # Follow FORWARD rename chain (from old name to new names)
+        while current in self.rename_map:
+            if current in visited:  # Guard against circular renames (shouldn't happen)
+                break
+            visited.add(current)
+            current = self.rename_map[current]  # Move to the NEW name
+        
         return current
         
     def build_from_events(self, events: List[Any], rename_map: Dict[str, str]) -> None:

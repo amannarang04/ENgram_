@@ -121,7 +121,9 @@ class ContextBuilder:
         blast_radius = self._calculate_blast_radius(rc_svc)
         
         # 5. Historical Context (Fingerprinting + Pattern Matching)
-        fp = self.engine.fingerprinter.extract_fingerprint(causality, incident)
+        fp1 = self.engine.fingerprinter.extract_fingerprint(causality, incident)
+        fp2 = self.engine.fingerprinter.extract_morphing_invariant_fingerprint(causality, incident) if hasattr(self.engine.fingerprinter, 'extract_morphing_invariant_fingerprint') else {}
+        fp = {**fp1, **fp2}
         matches = self.engine.pattern_matcher.search(fp, limit=5)
         best_match = matches[0] if matches else None
         

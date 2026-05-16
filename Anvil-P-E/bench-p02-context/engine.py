@@ -303,7 +303,16 @@ class EventStore:
         Returns:
             Current canonical service name
         """
-        return self.rename_map.get(old_name, old_name)
+        visited = set()
+        current = old_name
+        
+        while current in self.rename_map:
+            if current in visited:
+                break
+            visited.add(current)
+            current = self.rename_map[current]
+        
+        return current
     
     def query_events_by_service(self, service: str) -> List[Event]:
         """

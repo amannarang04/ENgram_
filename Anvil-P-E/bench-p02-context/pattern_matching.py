@@ -103,6 +103,19 @@ class IncidentIndex:
             score += 0.00
             matching_dimensions.append(f'depth: similar ({c_depth} vs {h_depth})')
             
+        # Morphing Invariants (Patch 4)
+        c_behav = current.get('behavioral_family')
+        h_behav = historical.get('behavioral_family')
+        if c_behav and c_behav == h_behav:
+            score += 0.15
+            matching_dimensions.append(f'behavioral_family: {c_behav} (exact)')
+            
+        c_blast = current.get('blast_radius_family')
+        h_blast = historical.get('blast_radius_family')
+        if c_blast and c_blast == h_blast:
+            score += 0.10
+            matching_dimensions.append(f'blast_radius_family: {c_blast} (exact)')
+            
         return {
             'score': round(score, 4),
             'matching_dimensions': matching_dimensions,
