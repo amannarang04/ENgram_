@@ -43,19 +43,20 @@ class EngineAdapter(Adapter):
         causal_chain = []
         for step in raw_context.get('root_cause_analysis', {}).get('causal_chain', []):
             causal_chain.append({
-                "cause_event_id": "unknown",  # We'd need actual IDs from our causality logic
-                "effect_event_id": "unknown",
+                "cause_event_id": step.get('cause_event_id', 'unknown'),
+                "effect_event_id": step.get('effect_event_id', 'unknown'),
                 "evidence": f"Deploy found for {step.get('service')}",
                 "confidence": raw_context.get('root_cause_analysis', {}).get('confidence', 0.0)
             })
             
         similar_past = []
         for match in raw_context.get('historical_context', {}).get('top_matches', []):
-            similar_past.append({
-                "incident_id": match.get('incident_id'),
-                "similarity": match.get('similarity_score'),
-                "rationale": match.get('explanation')
-            })
+            if match.get('similarity_score', 0) >= 0.8:
+                similar_past.append({
+                    "incident_id": match.get('incident_id'),
+                    "similarity": match.get('similarity_score'),
+                    "rationale": match.get('explanation')
+                })
             
         remediations = []
         for action in raw_context.get('recommended_actions', {}).get('immediate_actions', []):
@@ -68,7 +69,7 @@ class EngineAdapter(Adapter):
 
         # Assemble the final conformant Context
         return {
-            "related_events": [],  # We didn't explicitly store related events in our Context builder yet
+            "related_events": raw_context.get('related_events', []),
             "causal_chain": causal_chain,
             "similar_past_incidents": similar_past,
             "suggested_remediations": remediations,

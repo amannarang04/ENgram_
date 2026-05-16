@@ -151,6 +151,7 @@ class ContextBuilder:
             'incident_metadata': metadata,
             'root_cause_analysis': causality,
             'blast_radius': blast_radius,
+            'related_events': related,
             'historical_context': {'top_matches': matches},
             'recommended_actions': {'immediate_actions': actions},
             'confidence_assessment': {

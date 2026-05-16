@@ -392,6 +392,23 @@ class EventStore:
         """Return total event count."""
         return len(self.events)
 
+    def get_event_by_id(self, event_id: str) -> Optional[Event]:
+        """Get event by ID."""
+        for e in self.events:
+            if e.id == event_id:
+                return e
+        return None
+
+    def find_event_by_raw(self, raw_dict: Dict[str, Any]) -> Optional[Event]:
+        """Find event matching a raw dictionary."""
+        # Simple match based on ts and kind
+        ts = parse_iso_timestamp(raw_dict.get('ts'))
+        kind = raw_dict.get('kind')
+        for e in self.events:
+            if e.kind == kind and e.ts == ts:
+                return e
+        return None
+
 
 # ============================================================================
 # PART 1D: MAIN ENGINE CLASS

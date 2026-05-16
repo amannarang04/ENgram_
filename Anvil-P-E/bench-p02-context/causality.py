@@ -91,7 +91,9 @@ class CausalityDetector:
                         'step': 1,
                         'service': deployed_svc,
                         'event_type': 'deploy',
-                        'event_time': deploy.ts
+                        'event_time': deploy.ts,
+                        'cause_event_id': deploy.id,
+                        'effect_event_id': incident.get('id', 'unknown')
                     }
                 ]
             })
