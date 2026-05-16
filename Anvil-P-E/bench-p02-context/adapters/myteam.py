@@ -59,13 +59,27 @@ class EngineAdapter(Adapter):
                 })
             
         remediations = []
-        for action in raw_context.get('recommended_actions', {}).get('immediate_actions', []):
-            remediations.append({
-                "action": action.get('action'),
-                "target": "unknown",
-                "historical_outcome": "resolved",
-                "confidence": action.get('confidence')
-            })
+        if similar_past:
+            best_match = similar_past[0]
+            hist_inc_id = best_match['incident_id']
+            # Fetch the actual remediation event for the historical incident to get the true outcome
+            hist_remediations = [e for e in self.engine.get_events_for_incident(hist_inc_id) if e.kind == 'remediation']
+            if hist_remediations:
+                latest_rem = hist_remediations[-1]
+                remediations.append({
+                    "action": latest_rem.action,
+                    "target": latest_rem.target or s_copy.get('error_service'),
+                    "historical_outcome": latest_rem.outcome,
+                    "confidence": min(0.95, best_match['similarity'])
+                })
+            else:
+                for action in raw_context.get('recommended_actions', {}).get('immediate_actions', []):
+                    remediations.append({
+                        "action": action.get('action'),
+                        "target": s_copy.get('error_service', 'unknown'),
+                        "historical_outcome": "resolved",
+                        "confidence": action.get('confidence')
+                    })
 
         # Assemble the final conformant Context
         return {
