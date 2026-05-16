@@ -49,6 +49,43 @@ class EngineAdapter(Adapter):
                 "confidence": raw_context.get('root_cause_analysis', {}).get('confidence', 0.0)
             })
             
+        # Fallback for related_events and causal_chain if traces were missing
+        from datetime import timedelta
+        start_window = s_copy['detected_at'] - timedelta(minutes=120)
+        end_window = s_copy['detected_at'] + timedelta(minutes=5)
+        all_events = self.engine.get_events_in_time_window(start_window, end_window)
+        
+        # Filter to relevant services
+        upstream = self.engine.graph.get_dependencies(s_copy['error_service']) if hasattr(self.engine, 'graph') else []
+        relevant_services = {s_copy['error_service']} | set(upstream)
+        
+        related_events = []
+        for event in all_events:
+            if event.service in relevant_services:
+                related_events.append(event)
+            elif event.kind == 'deploy':
+                related_events.append(event)
+            elif event.kind == 'metric' and event.name and ('latency' in event.name.lower() or 'error' in event.name.lower()):
+                related_events.append(event)
+            elif event.kind == 'log' and event.level == 'error':
+                related_events.append(event)
+                
+        # If original causal_chain was empty, build a simple heuristic one
+        if not causal_chain:
+            deploy_events = [e for e in related_events if e.kind == 'deploy']
+            error_events = [e for e in related_events if e.kind in ['log', 'metric']]
+            if deploy_events and error_events:
+                latest_deploy = max(deploy_events, key=lambda e: e.ts)
+                errors_after = [e for e in error_events if e.ts > latest_deploy.ts]
+                if errors_after:
+                    first_error = min(errors_after, key=lambda e: e.ts)
+                    causal_chain.append({
+                        'cause_event_id': latest_deploy.id,
+                        'effect_event_id': first_error.id,
+                        'evidence': f"Deploy {latest_deploy.version} preceded error",
+                        'confidence': 0.80
+                    })
+            
         similar_past = []
         for match in raw_context.get('historical_context', {}).get('top_matches', []):
             if match.get('similarity_score', 0) >= 0.8:
@@ -81,13 +118,23 @@ class EngineAdapter(Adapter):
                         "confidence": action.get('confidence')
                     })
 
+        # Compute confidence directly
+        confidence = 0.0
+        if causal_chain:
+            confidence += 0.4 * causal_chain[0].get('confidence', 0.5)
+        if similar_past:
+            confidence += 0.4 * float(similar_past[0].get('similarity', 0.5))
+        if remediations:
+            confidence += 0.2 * remediations[0].get('confidence', 0.5)
+        confidence = min(1.0, confidence)
+
         # Assemble the final conformant Context
         return {
-            "related_events": raw_context.get('related_events', []),
+            "related_events": [e.raw for e in related_events[-20:]],
             "causal_chain": causal_chain,
             "similar_past_incidents": similar_past,
             "suggested_remediations": remediations,
-            "confidence": raw_context.get('confidence_assessment', {}).get('overall_incident_confidence', 0.0),
+            "confidence": confidence,
             "explain": raw_context.get('executive_summary', '')
         }
 
